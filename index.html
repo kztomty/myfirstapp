@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>インベーダーゲーム</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            text-align: center;
+        }
+
+        canvas {
+            background-color: #000;
+            border: 2px solid #33ff33;
+            box-shadow: 0 0 10px #33ff33;
+            display: block;
+            margin: 0 auto;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas if needed, though we use buttons */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        #score-display {
+            text-align: left;
+            padding: 10px;
+            font-size: 20px;
+            color: #33ff33;
+        }
+
+        #message-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: auto; /* Allow clicking buttons inside */
+        }
+
+        h1 {
+            color: #33ff33;
+            margin-bottom: 10px;
+            text-shadow: 0 0 5px #33ff33;
+        }
+
+        p {
+            font-size: 14px;
+            margin-bottom: 20px;
+            color: #ccc;
+        }
+
+        button {
+            background-color: transparent;
+            color: #33ff33;
+            border: 2px solid #33ff33;
+            padding: 10px 20px;
+            font-size: 18px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background-color: #33ff33;
+            color: #000;
+        }
+
+        #controls-info {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+        <div id="ui-layer">
+            <div id="score-display">スコア: <span id="score">0</span></div>
+        </div>
+        
+        <div id="message-overlay">
+            <h1 id="game-title">インベーダーゲーム</h1>
+            <p id="game-subtitle">地球を守れ！</p>
+            <button id="start-btn">ゲームスタート</button>
+            <div id="controls-info">
+                移動: 左右矢印キー (← →)<br>
+                発射: スペースキー
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const startBtn = document.getElementById('start-btn');
+        const messageOverlay = document.getElementById('message-overlay');
+        const gameTitle = document.getElementById('game-title');
+        const gameSubtitle = document.getElementById('game-subtitle');
+        const controlsInfo = document.getElementById('controls-info');
+
+        // Game state variables
+        let animationId;
+        let isGameOver = false;
+        let isPlaying = false;
+        let score = 0;
+
+        // Key states
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false,
+            Space: false
+        };
+
+        // Listen for keydown events
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft') keys.ArrowLeft = true;
+            if (e.code === 'ArrowRight') keys.ArrowRight = true;
+            if (e.code === 'Space') {
+                keys.Space = true;
+                // Prevent default scrolling when hitting space
+                e.preventDefault(); 
+            }
+        });
+
+        // Listen for keyup events
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ArrowLeft') keys.ArrowLeft = false;
+            if (e.code === 'ArrowRight') keys.ArrowRight = false;
+            if (e.code === 'Space') keys.Space = false;
+        });
+
+        // Player Class
+        class Player {
+            constructor() {
+                this.width = 40;
+                this.height = 20;
+                this.x = canvas.width / 2 - this.width / 2;
+                this.y = canvas.height - this.height - 10;
+                this.speed = 5;
+                this.color = '#00ffff';
+                this.cooldown = 0;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                // Simple shape for player (tank-like)
+                ctx.fillRect(this.x, this.y + 10, this.width, this.height - 10);
+                ctx.fillRect(this.x + 15, this.y, 10, 10);
+            }
+
+            update() {
+                if (keys.ArrowLeft && this.x > 0) {
+                    this.x -= this.speed;
+                }
+                if (keys.ArrowRight && this.x + this.width < canvas.width) {
+                    this.x += this.speed;
+                }
+
+                // Handle shooting
+                if (keys.Space && this.cooldown === 0) {
+                    bullets.push(new Bullet(this.x + this.width / 2 - 2, this.y));
+                    this.cooldown = 15; // Frames between shots
+                }
+
+                if (this.cooldown > 0) this.cooldown--;
+            }
+        }
+
+        // Bullet Class
+        class Bullet {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 4;
+                this.height = 10;
+                this.speed = 7;
+                this.color = '#ffff00';
+                this.markedForDeletion = false;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+
+            update() {
+                this.y -= this.speed;
+                if (this.y < 0) this.markedForDeletion = true;
+            }
+        }
+
+        // Invader Class
+        class Invader {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 20;
+                this.color = '#ff00ff';
+                this.markedForDeletion = false;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                // Simple invader shape
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.clearRect(this.x + 5, this.y + 15, 5, 5);
+                ctx.clearRect(this.x + 20, this.y + 15, 5, 5);
+            }
+            
+            // Movement is handled by the InvaderManager
+        }
+
+        // Manage group of invaders
+        class InvaderManager {
+            constructor() {
+                this.invaders = [];
+                this.rows = 4;
+                this.cols = 8;
+                this.spacingX = 45;
+                this.spacingY = 35;
+                this.startX = 50;
+                this.startY = 30;
+                this.direction = 1; // 1 for right, -1 for left
+                this.speedX = 1;
+                this.speedY = 15;
+                this.moveDown = false;
+            }
+
+            init() {
+                this.invaders = [];
+                for (let r = 0; r < this.rows; r++) {
+                    for (let c = 0; c < this.cols; c++) {
+                        let x = this.startX + c * this.spacingX;
+                        let y = this.startY + r * this.spacingY;
+                        this.invaders.push(new Invader(x, y));
+                    }
+                }
+            }
+
+            draw() {
+                this.invaders.forEach(invader => invader.draw());
+            }
+
+            update() {
+                let hitWall = false;
+
+                // Check for wall collisions
+                for (let i = 0; i < this.invaders.length; i++) {
+                    let invader = this.invaders[i];
+                    if (invader.x + invader.width >= canvas.width || invader.x <= 0) {
+                        hitWall = true;
+                        break;
+                    }
+                }
+
+                // If wall hit, reverse direction and move down
+                if (hitWall) {
+                    this.direction *= -1;
+                    this.invaders.forEach(invader => {
+                        invader.y += this.speedY;
+                        invader.x += this.speedX * this.direction * 2; // Keep them moving away from wall
+                    });
+                    
+                    // Increase difficulty slightly
+                    this.speedX += 0.2;
+                } else {
+                    // Normal horizontal movement
+                    this.invaders.forEach(invader => {
+                        invader.x += this.speedX * this.direction;
+                    });
+                }
+
+                // Remove destroyed invaders
+                this.invaders = this.invaders.filter(invader => !invader.markedForDeletion);
+            }
+        }
+
+        let player;
+        let bullets = [];
+        let invaderManager;
+
+        function checkCollisions() {
+            // Bullet vs Invader
+            bullets.forEach(bullet => {
+                invaderManager.invaders.forEach(invader => {
+                    if (
+                        bullet.x < invader.x + invader.width &&
+                        bullet.x + bullet.width > invader.x &&
+                        bullet.y < invader.y + invader.height &&
+                        bullet.y + bullet.height > invader.y
+                    ) {
+                        bullet.markedForDeletion = true;
+                        invader.markedForDeletion = true;
+                        score += 10;
+                        scoreElement.innerText = score;
+                    }
+                });
+            });
+
+            // Invader vs Player or Bottom Wall
+            invaderManager.invaders.forEach(invader => {
+                // Check if invader reached the bottom
+                if (invader.y + invader.height >= canvas.height) {
+                    gameOver("インベーダーに侵略されました...");
+                }
+                
+                // Check if invader hit player
+                if (
+                    invader.x < player.x + player.width &&
+                    invader.x + invader.width > player.x &&
+                    invader.y < player.y + player.height &&
+                    invader.y + invader.height > player.y
+                ) {
+                    gameOver("撃墜されました...");
+                }
+            });
+        }
+
+        function gameLoop() {
+            if (!isPlaying) return;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update & Draw Player
+            player.update();
+            player.draw();
+
+            // Update & Draw Bullets
+            bullets.forEach(bullet => {
+                bullet.update();
+                bullet.draw();
+            });
+            bullets = bullets.filter(bullet => !bullet.markedForDeletion);
+
+            // Update & Draw Invaders
+            invaderManager.update();
+            invaderManager.draw();
+
+            // Check Collisions
+            checkCollisions();
+
+            // Check Win Condition
+            if (invaderManager.invaders.length === 0) {
+                gameWin();
+            }
+
+            if (!isGameOver) {
+                animationId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function initGame() {
+            player = new Player();
+            bullets = [];
+            invaderManager = new InvaderManager();
+            invaderManager.init();
+            score = 0;
+            scoreElement.innerText = score;
+            isGameOver = false;
+            isPlaying = true;
+            
+            messageOverlay.style.display = 'none';
+            
+            // Ensure previous loop is stopped before starting a new one
+            cancelAnimationFrame(animationId);
+            gameLoop();
+        }
+
+        function gameOver(reason) {
+            isGameOver = true;
+            isPlaying = false;
+            
+            gameTitle.innerText = "ゲームオーバー";
+            gameTitle.style.color = "#ff3333";
+            gameSubtitle.innerText = reason;
+            startBtn.innerText = "リトライ";
+            controlsInfo.style.display = 'none';
+            messageOverlay.style.display = 'block';
+        }
+
+        function gameWin() {
+            isGameOver = true;
+            isPlaying = false;
+            
+            gameTitle.innerText = "ステージクリア！";
+            gameTitle.style.color = "#ffff33";
+            gameSubtitle.innerText = `最終スコア: ${score}`;
+            startBtn.innerText = "もう一度プレイ";
+            controlsInfo.style.display = 'none';
+            messageOverlay.style.display = 'block';
+        }
+
+        startBtn.addEventListener('click', initGame);
+
+    </script>
+</body>
+</html>
